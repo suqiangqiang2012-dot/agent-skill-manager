@@ -10,7 +10,15 @@
       "install_mode": "copy",
       "reload_required": true,
       "requirements": ["python"]
+    },
+    {
+      "agent": "workbuddy",
+      "operating_systems": ["windows"],
+      "architectures": ["any"],
+      "minimum_agent_version": "5.5.4",
+      "install_mode": "copy",
+      "reload_required": false,
+      "requirements": []
     }
   ]
 }
-

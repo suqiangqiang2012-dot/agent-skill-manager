@@ -23,11 +23,11 @@ import uuid
 import zipfile
 
 
-STATE_SCHEMA = 1
+STATE_SCHEMA = 2
 CATALOG_SCHEMA = 1
 MANIFEST_SCHEMA = 1
-USER_AGENT = "agent-skill-manager/0.1"
-SUPPORTED_INSTALL_AGENTS = {"codex"}
+USER_AGENT = "agent-skill-manager/0.2"
+SUPPORTED_INSTALL_AGENTS = {"codex", "workbuddy"}
 
 
 class ManagerError(RuntimeError):
@@ -146,11 +146,33 @@ def load_catalog(source: str) -> dict:
     return catalog
 
 
+def state_key(agent: str, skill_id: str) -> str:
+    return f"{agent}:{skill_id}"
+
+
+def migrate_state_v1(state: dict) -> dict:
+    installed_v1 = state.get("installed", {})
+    backups_v1 = state.get("backups", {})
+    migrated = {"schema_version": STATE_SCHEMA, "installed": {}, "backups": {}}
+    for skill_id, record in installed_v1.items():
+        agent = str(record.get("agent") or "codex")
+        key = state_key(agent, skill_id)
+        migrated["installed"][key] = record
+        migrated["backups"][key] = list(backups_v1.get(skill_id, []))
+    for skill_id, backups in backups_v1.items():
+        if skill_id in installed_v1:
+            continue
+        migrated["backups"][state_key("codex", skill_id)] = list(backups)
+    return migrated
+
+
 def load_state() -> dict:
     path = state_home() / "state.json"
     if not path.exists():
         return {"schema_version": STATE_SCHEMA, "installed": {}, "backups": {}}
     state = load_json_file(path)
+    if state.get("schema_version") == 1:
+        return migrate_state_v1(state)
     if state.get("schema_version") != STATE_SCHEMA:
         raise ManagerError("Unsupported local state schema")
     state.setdefault("installed", {})
@@ -304,10 +326,46 @@ def resolve_install_root(agent: str, explicit: str | None) -> Path:
     if agent == "codex":
         codex_home = os.environ.get("CODEX_HOME")
         return (Path(codex_home).expanduser() if codex_home else Path.home() / ".codex") / "skills"
+    if agent == "workbuddy":
+        workbuddy_home = os.environ.get("WORKBUDDY_HOME")
+        return (
+            Path(workbuddy_home).expanduser()
+            if workbuddy_home
+            else Path.home() / ".workbuddy"
+        ) / "skills"
     raise ManagerError(f"Install root requires an implemented adapter: {agent}")
 
 
-def check_requirements(package: dict) -> None:
+def detect_agent_version(agent: str) -> str | None:
+    if agent != "workbuddy":
+        return None
+    os_name, _ = runtime_target()
+    if os_name != "windows":
+        return None
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+    manifest = base / "Programs" / "WorkBuddy" / "resources" / "install-manifest.json"
+    if not manifest.is_file():
+        return None
+    value = load_json_file(manifest).get("appVersion")
+    return normalize_version(str(value)) if value else None
+
+
+def check_agent_version(package: dict, agent: str) -> str | None:
+    minimum = package.get("minimum_agent_version")
+    detected = detect_agent_version(agent)
+    if minimum is None:
+        return detected
+    minimum = normalize_version(str(minimum))
+    if detected is None:
+        raise ManagerError(f"Cannot detect installed {agent} version; requires {minimum} or later")
+    if version_tuple(detected) < version_tuple(minimum):
+        raise ManagerError(f"{agent} {detected} is below required version {minimum}")
+    return detected
+
+
+def check_requirements(package: dict, agent: str) -> str | None:
+    detected_version = check_agent_version(package, agent)
     missing: list[str] = []
     unresolved: list[str] = []
     for requirement in package.get("requirements", []):
@@ -332,6 +390,7 @@ def check_requirements(package: dict) -> None:
         raise ManagerError(
             "Human verification required for capabilities: " + ", ".join(unresolved)
         )
+    return detected_version
 
 
 def validate_skill_directory(root: Path, expected_id: str) -> None:
@@ -376,24 +435,33 @@ def install_skill(args: argparse.Namespace) -> dict:
     entry = find_catalog_entry(catalog, args.skill_id)
     release, manifest, package, token = release_context(entry, args.agent)
     version = normalize_version(str(manifest["version"]))
+    os_name, architecture = runtime_target()
+    detected_version = check_agent_version(package, args.agent)
     required_confirmation = f"{args.skill_id}@{version}"
     proposal = {
         "action": "install",
         "skill_id": args.skill_id,
         "version": version,
         "summary": manifest.get("summary", ""),
+        "agent": args.agent,
+        "agent_version": detected_version,
+        "operating_system": os_name,
+        "architecture": architecture,
+        "requirements": package.get("requirements", []),
+        "reload_required": bool(package.get("reload_required", True)),
         "package": package.get("asset"),
         "sha256": package.get("sha256"),
         "required_confirmation": required_confirmation,
     }
     if args.confirm != required_confirmation:
         raise ConfirmationRequired("Installation confirmation required", proposal)
-    check_requirements(package)
+    check_requirements(package, args.agent)
     install_root = resolve_install_root(args.agent, args.install_root)
     install_root.mkdir(parents=True, exist_ok=True)
     target = install_root / args.skill_id
     state = load_state()
-    installed = state["installed"].get(args.skill_id)
+    key = state_key(args.agent, args.skill_id)
+    installed = state["installed"].get(key)
     if target.exists():
         current_digest = tree_digest(target)
         recorded_digest = installed.get("tree_sha256") if installed else None
@@ -435,7 +503,7 @@ def install_skill(args: argparse.Namespace) -> dict:
             os.replace(stage, target)
             if old.exists():
                 previous_version = installed.get("version", "unmanaged") if installed else "unmanaged"
-                destination = state_home() / "backups" / args.skill_id / backup_name(previous_version)
+                destination = state_home() / "backups" / args.agent / args.skill_id / backup_name(previous_version)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(old, destination)
                 backup_record = {
@@ -449,8 +517,8 @@ def install_skill(args: argparse.Namespace) -> dict:
                 os.replace(old, target)
             raise
     if backup_record:
-        state["backups"].setdefault(args.skill_id, []).append(backup_record)
-    state["installed"][args.skill_id] = {
+        state["backups"].setdefault(key, []).append(backup_record)
+    state["installed"][key] = {
         "version": version,
         "agent": args.agent,
         "install_root": str(install_root),
@@ -462,20 +530,21 @@ def install_skill(args: argparse.Namespace) -> dict:
     return {**proposal, "status": "installed", "tree_sha256": new_digest}
 
 
-def list_backups(skill_id: str) -> dict:
+def list_backups(skill_id: str, agent: str) -> dict:
     state = load_state()
-    backups = state["backups"].get(skill_id, [])
-    return {"skill_id": skill_id, "backups": backups}
+    backups = state["backups"].get(state_key(agent, skill_id), [])
+    return {"skill_id": skill_id, "agent": agent, "backups": backups}
 
 
 def rollback_skill(args: argparse.Namespace) -> dict:
     state = load_state()
-    installed = state["installed"].get(args.skill_id)
+    key = state_key(args.agent, args.skill_id)
+    installed = state["installed"].get(key)
     if not installed:
         raise ManagerError(f"Skill is not managed: {args.skill_id}")
     matches = [
         item
-        for item in state["backups"].get(args.skill_id, [])
+        for item in state["backups"].get(key, [])
         if item.get("version") == args.version
     ]
     if not matches:
@@ -488,6 +557,7 @@ def rollback_skill(args: argparse.Namespace) -> dict:
     proposal = {
         "action": "rollback",
         "skill_id": args.skill_id,
+        "agent": args.agent,
         "current_version": installed["version"],
         "target_version": args.version,
         "required_confirmation": confirmation,
@@ -507,13 +577,20 @@ def rollback_skill(args: argparse.Namespace) -> dict:
     try:
         os.replace(target, current_old)
         os.replace(stage, target)
-        current_backup = state_home() / "backups" / args.skill_id / backup_name(installed["version"])
+        current_backup = (
+            state_home()
+            / "backups"
+            / args.agent
+            / args.skill_id
+            / backup_name(installed["version"])
+        )
+        current_backup.parent.mkdir(parents=True, exist_ok=True)
         os.replace(current_old, current_backup)
     except Exception:
         if not target.exists() and current_old.exists():
             os.replace(current_old, target)
         raise
-    state["backups"][args.skill_id].append(
+    state["backups"].setdefault(key, []).append(
         {
             "version": installed["version"],
             "path": str(current_backup),
@@ -521,7 +598,7 @@ def rollback_skill(args: argparse.Namespace) -> dict:
             "tree_sha256": tree_digest(current_backup),
         }
     )
-    state["installed"][args.skill_id] = {
+    state["installed"][key] = {
         **installed,
         "version": args.version,
         "installed_at": utc_now(),
@@ -537,7 +614,7 @@ def check_updates(args: argparse.Namespace) -> dict:
     state = load_state()
     rows = []
     for entry in catalog["skills"]:
-        installed = state["installed"].get(entry["id"])
+        installed = state["installed"].get(state_key(args.agent, entry["id"]))
         current = installed.get("version") if installed else None
         row = {
             "skill_id": entry["id"],
@@ -558,9 +635,11 @@ def check_updates(args: argparse.Namespace) -> dict:
             rows.append(row)
             continue
         try:
-            _, manifest, _, _ = release_context(entry, args.agent)
+            _, manifest, package, _ = release_context(entry, args.agent)
+            detected_agent_version = check_agent_version(package, args.agent)
             latest = normalize_version(str(manifest["version"]))
             row["latest_version"] = latest
+            row["agent_version"] = detected_agent_version
             row["summary"] = manifest.get("summary", "")
             if current is None:
                 row["status"] = "not-installed"
@@ -574,7 +653,7 @@ def check_updates(args: argparse.Namespace) -> dict:
         rows.append(row)
     report = {"checked_at": utc_now(), "agent": args.agent, "skills": rows}
     if args.cache_report:
-        save_json_atomic(state_home() / "last-check.json", report)
+        save_json_atomic(state_home() / f"last-check-{args.agent}.json", report)
     return report
 
 
@@ -601,9 +680,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     backups = subparsers.add_parser("backups", help="List retained backups")
     backups.add_argument("skill_id")
+    backups.add_argument("--agent", required=True)
 
     rollback = subparsers.add_parser("rollback", help="Restore a retained backup")
     rollback.add_argument("skill_id")
+    rollback.add_argument("--agent", required=True)
     rollback.add_argument("--version", required=True)
     rollback.add_argument("--confirm")
 
@@ -618,7 +699,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "install":
             result = install_skill(args)
         elif args.command == "backups":
-            result = list_backups(args.skill_id)
+            result = list_backups(args.skill_id, args.agent)
         elif args.command == "rollback":
             result = rollback_skill(args)
         else:

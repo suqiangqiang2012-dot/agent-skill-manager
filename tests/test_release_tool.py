@@ -43,6 +43,15 @@ class ReleaseToolTests(unittest.TestCase):
                             "install_mode": "copy",
                             "reload_required": True,
                             "requirements": [],
+                        },
+                        {
+                            "agent": "workbuddy",
+                            "operating_systems": ["windows"],
+                            "architectures": ["any"],
+                            "minimum_agent_version": "5.5.4",
+                            "install_mode": "copy",
+                            "reload_required": False,
+                            "requirements": [],
                         }
                     ],
                 }
@@ -62,15 +71,36 @@ class ReleaseToolTests(unittest.TestCase):
             self.assertEqual(result["status"], "prepared")
             manifest_path = repo / "dist" / "1.2.3" / "release-manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            package = manifest["packages"][0]
+            packages = {item["agent"]: item for item in manifest["packages"]}
+            self.assertEqual(set(packages), {"codex", "workbuddy"})
+            self.assertEqual(
+                packages["workbuddy"]["minimum_agent_version"],
+                "5.5.4",
+            )
+            self.assertFalse(packages["workbuddy"]["reload_required"])
+            package = packages["workbuddy"]
             archive_path = manifest_path.parent / package["asset"]
             actual = hashlib.sha256(archive_path.read_bytes()).hexdigest()
             self.assertEqual(actual, package["sha256"])
+            self.assertEqual(
+                packages["codex"]["sha256"],
+                packages["workbuddy"]["sha256"],
+            )
             with zipfile.ZipFile(archive_path) as archive:
                 self.assertEqual(
                     sorted(archive.namelist()),
                     ["SKILL.md", "references/details.md"],
                 )
+
+    def test_invalid_minimum_agent_version_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = self.create_repo(Path(temporary))
+            config_path = repo / "release.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["targets"][1]["minimum_agent_version"] = "5.5"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            with self.assertRaises(release_tool.ReleaseError):
+                release_tool.prepare_release(repo, "1.2.3", "Invalid target.")
 
     def test_missing_reference_fails(self):
         with tempfile.TemporaryDirectory() as temporary:

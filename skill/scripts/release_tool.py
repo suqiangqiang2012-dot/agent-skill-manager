@@ -202,6 +202,9 @@ def validate_release_config(config: dict, expected_skill_id: str) -> list[dict]:
         seen.add(key)
         if target.get("install_mode") != "copy":
             raise ReleaseError(f"Unsupported install mode for {agent}")
+        minimum_agent_version = target.get("minimum_agent_version")
+        if minimum_agent_version is not None:
+            normalize_version(str(minimum_agent_version))
         requirements = target.get("requirements", [])
         if not isinstance(requirements, list):
             raise ReleaseError(f"Target {agent} requirements must be a list")

@@ -25,9 +25,10 @@ permission to mutate local skills or GitHub repositories.
 Use `scripts/skill_manager.py` for installed-skill operations:
 
 ```text
-python scripts/skill_manager.py check --catalog <path-or-url> --agent codex
-python scripts/skill_manager.py install <skill-id> --catalog <path-or-url> --agent codex
-python scripts/skill_manager.py rollback <skill-id> --version <version>
+python scripts/skill_manager.py check --catalog <path-or-url> --agent <agent>
+python scripts/skill_manager.py install <skill-id> --catalog <path-or-url> --agent <agent>
+python scripts/skill_manager.py backups <skill-id> --agent <agent>
+python scripts/skill_manager.py rollback <skill-id> --agent <agent> --version <version>
 ```
 
 Use `scripts/release_tool.py` for release operations:
@@ -40,7 +41,9 @@ python scripts/release_tool.py publish --repository owner/repo --skill-id <id> -
 ```
 
 Resolve `python` to an available Python 3.11+ executable. The scripts use only the
-standard library. Do not install missing runtimes without the user's permission.
+standard library. In WorkBuddy on Windows, use its bundled runtime at
+`~/.workbuddy/binaries/python/envs/default/Scripts/python.exe` when `python` on
+`PATH` is unavailable. Do not install missing runtimes without the user's permission.
 
 ## Non-negotiable controls
 

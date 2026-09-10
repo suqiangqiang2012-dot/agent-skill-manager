@@ -12,6 +12,12 @@ publishing stable Agent Skill releases.
 - Package integrity is verified before extraction.
 - Unsupported adapters fail closed.
 
+## Supported adapters
+
+- Codex: Windows and macOS.
+- WorkBuddy: Windows 5.5.4 or later; uses the native `~/.workbuddy/skills` root
+  and WorkBuddy's bundled Python runtime.
+- Other adapters remain fail-closed until validated.
 ## Repository layout
 
 - `skill/`: canonical Agent Skill source.
