@@ -547,6 +547,9 @@ def check_updates(args: argparse.Namespace) -> dict:
             "status": entry.get("status", "active"),
             "summary": "",
         }
+        if entry.get("status") != "active":
+            rows.append(row)
+            continue
         if not entry.get("repository"):
             rows.append(row)
             continue

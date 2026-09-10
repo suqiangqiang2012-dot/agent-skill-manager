@@ -82,7 +82,7 @@ class SkillManagerTests(unittest.TestCase):
                                 "display_name": "Example",
                                 "description": "Example",
                                 "visibility": "private",
-                                "repository": None,
+                                "repository": "owner/not-published",
                                 "release_manifest_asset": "release-manifest.json",
                                 "supported_agents": ["codex"],
                                 "status": "local-preparation",
