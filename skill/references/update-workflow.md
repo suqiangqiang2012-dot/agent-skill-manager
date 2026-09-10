@@ -51,11 +51,11 @@ Do not infer approval from an earlier request to check for updates.
 List available backups:
 
 ```text
-python scripts/skill_manager.py backups <skill-id>
+python scripts/skill_manager.py backups <skill-id> --agent <agent>
 ```
 
-Run rollback once without confirmation and show the proposed target. After approval,
-repeat with:
+Run rollback once with `--agent <agent>` and without confirmation, then show the
+proposed target. After approval, repeat the same command with:
 
 ```text
 --confirm rollback:<skill-id>@<version>
