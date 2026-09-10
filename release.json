@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "skill_id": "agent-skill-manager",
+  "targets": [
+    {
+      "agent": "codex",
+      "operating_systems": ["windows", "macos"],
+      "architectures": ["any"],
+      "minimum_agent_version": null,
+      "install_mode": "copy",
+      "reload_required": true,
+      "requirements": ["python"]
+    }
+  ]
+}
+

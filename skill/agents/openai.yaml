@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Skill Manager"
+  short_description: "Check, install, publish, and roll back versioned Agent Skills."
+  default_prompt: "Use $agent-skill-manager to check my installed skills for stable updates."
