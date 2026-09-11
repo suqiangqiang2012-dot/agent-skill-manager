@@ -21,8 +21,19 @@ publishing stable Agent Skill releases.
 ## Repository layout
 
 - `skill/`: canonical Agent Skill source.
+- `skill/assets/skill-repo-template/release.json`: portable starting point for a
+  new skill repository's release targets.
+- `docs/architecture.md`: repository, release, compatibility, and catalog model.
 - `tests/`: standard-library Python tests.
 - `release.json`: generated package targets.
+
+## New skill repositories
+
+Copy the bundled release template, replace its placeholder skill ID, and explicitly
+confirm the target Agents and operating systems before validation. Remove targets
+that have not been verified for that skill. The current template offers Codex on
+Windows and macOS plus WorkBuddy 5.5.4 or later on Windows; WorkBuddy on macOS is
+not yet validated.
 
 ## Validation
 

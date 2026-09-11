@@ -120,6 +120,34 @@ class ReleaseToolTests(unittest.TestCase):
                 "draft:example-skill@1.0.0",
             )
 
+    def test_draft_rejects_missing_declared_target_package(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = self.create_repo(Path(temporary))
+            release_tool.prepare_release(repo, "1.0.0", "Initial stable release.")
+            manifest_path = repo / "dist" / "1.0.0" / "release-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["packages"] = [
+                package
+                for package in manifest["packages"]
+                if package["agent"] != "workbuddy"
+            ]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaises(release_tool.ReleaseError):
+                release_tool.draft_release(
+                    repo, "owner/example-skill", "1.0.0", None
+                )
+
+    def test_draft_rejects_changed_package_contents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = self.create_repo(Path(temporary))
+            release_tool.prepare_release(repo, "1.0.0", "Initial stable release.")
+            package = next((repo / "dist" / "1.0.0").glob("*workbuddy*.zip"))
+            package.write_bytes(package.read_bytes() + b"changed")
+            with self.assertRaises(release_tool.ReleaseError):
+                release_tool.draft_release(
+                    repo, "owner/example-skill", "1.0.0", None
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

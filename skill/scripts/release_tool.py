@@ -318,6 +318,95 @@ def prepare_release(repo_dir: Path, version: str, summary: str) -> dict:
     }
 
 
+def release_target_key(value: dict) -> tuple:
+    return (
+        value.get("agent"),
+        tuple(sorted(value.get("operating_systems", []))),
+        tuple(sorted(value.get("architectures", []))),
+    )
+
+
+def validate_prepared_release(repo_dir: Path, version: str) -> dict:
+    """Revalidate prepared artifacts against current source and declared targets."""
+    repo_dir = repo_dir.resolve()
+    version = normalize_version(version)
+    output = repo_dir / "dist" / version
+    validation = validate_skill(repo_dir / "skill")
+    targets = validate_release_config(
+        read_json(repo_dir / "release.json"), validation["skill_id"]
+    )
+    manifest = read_json(output / "release-manifest.json")
+
+    if manifest.get("skill_id") != validation["skill_id"]:
+        raise ReleaseError("Prepared manifest skill_id does not match current source")
+    if normalize_version(str(manifest.get("version", ""))) != version:
+        raise ReleaseError("Prepared manifest version does not match requested version")
+    if manifest.get("channel") != "stable":
+        raise ReleaseError("Prepared manifest channel must be stable")
+    if manifest.get("source_files") != validation["files"]:
+        raise ReleaseError("Skill source changed after release preparation")
+
+    packages = manifest.get("packages")
+    if not isinstance(packages, list) or not packages:
+        raise ReleaseError("Prepared manifest has no packages")
+    expected_keys = [release_target_key(target) for target in targets]
+    actual_keys = [release_target_key(package) for package in packages]
+    if len(set(actual_keys)) != len(actual_keys):
+        raise ReleaseError("Prepared manifest has duplicate target packages")
+    missing = sorted(set(expected_keys) - set(actual_keys))
+    extra = sorted(set(actual_keys) - set(expected_keys))
+    if missing or extra:
+        raise ReleaseError(
+            f"Prepared packages do not match release targets; missing={missing}, extra={extra}"
+        )
+
+    packages_by_key = {release_target_key(package): package for package in packages}
+    expected_checksums: dict[str, str] = {}
+    for target in targets:
+        package = packages_by_key[release_target_key(target)]
+        expected_fields = {
+            "minimum_agent_version": target.get("minimum_agent_version"),
+            "install_mode": target["install_mode"],
+            "reload_required": bool(target.get("reload_required", True)),
+            "requirements": target.get("requirements", []),
+        }
+        for field, expected in expected_fields.items():
+            if package.get(field) != expected:
+                raise ReleaseError(
+                    f"Prepared package field mismatch for {target['agent']}: {field}"
+                )
+        asset = package.get("asset")
+        digest = package.get("sha256")
+        if not isinstance(asset, str) or not asset:
+            raise ReleaseError(f"Prepared package asset missing for {target['agent']}")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ReleaseError(f"Prepared package digest invalid for {target['agent']}")
+        asset_path = output / asset
+        if not asset_path.is_file():
+            raise ReleaseError(f"Prepared package file not found: {asset}")
+        if sha256_file(asset_path) != digest:
+            raise ReleaseError(f"Prepared package digest mismatch: {asset}")
+        expected_checksums[asset] = digest
+
+    checksums_path = output / "SHA256SUMS"
+    if not checksums_path.is_file():
+        raise ReleaseError("Prepared release is missing SHA256SUMS")
+    actual_checksums: dict[str, str] = {}
+    for line in checksums_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split(maxsplit=1)
+        if len(parts) != 2:
+            raise ReleaseError("Invalid SHA256SUMS entry")
+        digest, asset = parts
+        actual_checksums[asset.strip()] = digest
+    if actual_checksums != expected_checksums:
+        raise ReleaseError("SHA256SUMS does not match prepared packages")
+    if not (output / "release-notes.md").is_file():
+        raise ReleaseError("Prepared release is missing release-notes.md")
+    return manifest
+
+
 def require_gh() -> str:
     configured = os.environ.get("GH_CLI_PATH")
     if configured:
@@ -362,7 +451,7 @@ def draft_release(repo_dir: Path, repository: str, version: str, confirm: str | 
     repo_dir = repo_dir.resolve()
     version = normalize_version(version)
     output = repo_dir / "dist" / version
-    manifest = read_json(output / "release-manifest.json")
+    manifest = validate_prepared_release(repo_dir, version)
     skill_id = manifest.get("skill_id")
     token = f"draft:{skill_id}@{version}"
     proposal = {

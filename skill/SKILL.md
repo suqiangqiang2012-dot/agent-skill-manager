@@ -20,6 +20,12 @@ permission to mutate local skills or GitHub repositories.
 - When adding a new Agent or operating system, read
   [references/compatibility.md](references/compatibility.md).
 
+When initializing a new skill repository, copy and adapt
+[`assets/skill-repo-template/release.json`](assets/skill-repo-template/release.json).
+Before validation or preparation, explicitly confirm the intended Agents and
+operating systems, replace the placeholder skill ID, and remove every unvalidated
+target. Template entries are examples, not declarations of compatibility.
+
 ## Core commands
 
 Use `scripts/skill_manager.py` for installed-skill operations:
@@ -62,6 +68,9 @@ standard library. In WorkBuddy on Windows, use its bundled runtime at
 - Creating a Draft Release and publishing it are separate externally mutating
   actions. Obtain authorization for each. Publishing requires the exact token
   printed by the CLI.
+- After publishing a stable Release, audit catalog registration and run read-only
+  discovery checks for every supported Agent. Catalog commit and push remain
+  separately authorized actions; discovery checks never authorize installation.
 - Never put GitHub tokens in skill files, manifests, command output, or repositories.
   Use GitHub CLI authentication or an environment-provided token.
 

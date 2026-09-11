@@ -53,6 +53,12 @@ Before any GitHub mutation, show:
 
 Resolve GitHub CLI from `GH_CLI_PATH` first, then from `PATH`. Authentication
 must already be configured through GitHub CLI.
+Before requesting Draft authorization, revalidate the prepared release against the
+current `skill/` source and `release.json`. Every declared Agent, operating system,
+and architecture target must have exactly one matching package. Package files,
+manifest metadata, and SHA-256 values must still match. Stop if the source or target
+configuration changed after `prepare`.
+
 
 Draft creation requires GitHub CLI authentication and this exact token:
 
@@ -79,7 +85,21 @@ existing stable tag.
 
 ## Catalog
 
-After a stable Release is published, update the public catalog only when repository
-coordinates, visibility, supported Agents, or lifecycle status changed. The catalog
-does not duplicate the latest version; update checks query stable Releases directly.
+After every stable Release publication, audit the public catalog:
+
+- For a newly published skill, check whether its repository is registered. If it is
+  missing, prepare a catalog entry for user review.
+- For an already registered skill, do not update the catalog for a version-only
+  release. Update it only when repository coordinates, visibility, supported Agents,
+  or lifecycle status changed.
+- Show the catalog diff and validation result before asking to commit. Catalog commit
+  and push are separate actions and each requires explicit authorization.
+
+The catalog does not duplicate the latest version; update checks query stable
+Releases directly.
+
+After the Release and any required catalog update are publicly available, run
+read-only `check` commands for every supported Agent. Report whether each Agent can
+discover the stable Release and whether a compatible package is available. These
+checks do not authorize installation.
 
